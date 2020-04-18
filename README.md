@@ -1,2 +1,2 @@
-# bratatatatatatat
-a game
+# Blob Shooter
+first pygame project
