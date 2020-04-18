@@ -111,6 +111,7 @@ class Cannon(pygame.sprite.Sprite):
         self.rect.center = (x,y)
 
     def fire(self):
+        #self.fire_sound.play()
         current_time = pygame.time.get_ticks()
         if current_time - self.lastFire > self.fireCooldown:
             self.lastFire = current_time
@@ -122,7 +123,7 @@ class Cannon(pygame.sprite.Sprite):
         pass #cause of the physics involved and why the base of the cannon is on a separate image
 
 class Blob(pygame.sprite.Sprite):
-    def __init__(self,blob_types, all_sprites,blob_sprites):
+    def __init__(self,blob_types,hit_sound,all_sprites,blob_sprites):
         super().__init__()
         self.key = random.choice(list(blob_types.keys()))
         self.image = blob_types[self.key][0]
@@ -135,21 +136,22 @@ class Blob(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center = (self.posX,self.posY))
         self.pos = Vector2(self.posXY)
 
-        self.hitImg = blob_types[self.key][1]
-        self.popAnimation = blob_types[self.key][2]
+        self.popAnimation = blob_types[self.key][1]
+        self.popSound = blob_types[self.key][2]
         self.hitPoints = blob_types[self.key][3]
         self.scoreValue = blob_types[self.key][4]
         self.speed = blob_types[self.key][5]
-        self.is_hit = False
-        self.hitDuration = 5      
+        self.is_hit = False   
 
+        self.hit_sound = hit_sound
         self.blob_types = blob_types
         self.all_sprites = all_sprites
         self.blob_sprites = blob_sprites
 
     def update(self):
         if self.is_hit:
-            self.flash()
+            self.hit_sound.play()
+            self.is_hit = False
             
         self.pos += Vector2(0,self.speed)
         self.rect.center = self.pos
@@ -165,20 +167,13 @@ class Blob(pygame.sprite.Sprite):
             self.kill()
             self.explode_and_spawn()
 
-    def flash(self):
-        self.image = self.hitImg
-        self.hitDuration -= 1
-        if self.hitDuration <= 0:
-            self.image = self.original_image
-            self.is_hit = False
-            self.hitDuration = 5
-
     def explode_and_spawn(self):
         global SCORE
+        self.popSound.play()
         SCORE += self.scoreValue
         pop = Explode(self.rect.center,self.popAnimation)
         self.all_sprites.add(pop)
-        new_blob = Blob(self.blob_types,self.all_sprites,self.blob_sprites)
+        new_blob = Blob(self.blob_types,self.hit_sound,self.all_sprites,self.blob_sprites)
         self.all_sprites.add(new_blob)
         self.blob_sprites.add(new_blob)
 
@@ -305,13 +300,14 @@ def main():
     #Play music on loop and load sounds
     pygame.mixer.music.load('musicSFX/bg_music.mp3')
     pygame.mixer.music.play(-1)
-    fireSound = None
+    fireSound = None #pygame.mixer.Sound('musicSFX/fire.wav')
 
-    #Load/create images
+    #Load/create images & sounds
     blobImages = list()
-    blobHitImages = list()
     cannonStatusImages = list()
     hitAnimation = list()
+    popSounds = list()
+    hitSound = pygame.mixer.Sound('musicSFX/hit0.wav')
     popAnimations = {'smallPop':list(),'mediumPop':list(),'largePop':list()}
     bgImage = pygame.image.load('Background/Background.png')
     pauseBG = pygame.image.load('Background/pauseBG.png')
@@ -330,9 +326,9 @@ def main():
         cannonStatusImages.append(pygame.image.load(cannonPthImg))      
     for i in range(3):
         blobPthImg = 'Enemy/blob{0}.png'.format(i)
-        blobHitPthImg = 'Enemy/blob{0}hit.png'.format(i)
+        popPthSound = 'musicSFX/pop{0}.wav'.format(i)
         blobImages.append(pygame.image.load(blobPthImg))
-        blobHitImages.append(pygame.image.load(blobHitPthImg))
+        popSounds.append(pygame.mixer.Sound(popPthSound))
         
     for i in range(6):
         smallpopPthImg = 'Enemy/Blob1Pop/smallPop{0}.png'.format(i)
@@ -348,16 +344,16 @@ def main():
         popAnimations['largePop'].append(largePopImg)
         hitAnimation.append(ballHitImg)
 
-    #blobs >> type: [image, hitImage, popAnimation, hp, scoreValue, speed] 
-    blobsType = {'smallBlob' :[blobImages[0], blobHitImages[0], popAnimations['smallPop'],  1, 3, 1.2],
-                 'mediumBlob':[blobImages[1], blobHitImages[1], popAnimations['mediumPop'], 2, 6, 0.9],
-                 'largeBlob' :[blobImages[2], blobHitImages[2], popAnimations['largePop'],  3, 9, 0.6]}
+    #blobs >> type: [image, popAnimation, popSound,hp, scoreValue, speed] 
+    blobsType = {'smallBlob' :[blobImages[0], popAnimations['smallPop'], popSounds[0], 1, 3, 1.2],
+                 'mediumBlob':[blobImages[1], popAnimations['mediumPop'],popSounds[1], 2, 6, 0.9],
+                 'largeBlob' :[blobImages[2], popAnimations['largePop'], popSounds[2], 3, 9, 0.6]}
 
     cannon = Cannon(cannonStatusImages,cannonBaseImage,cannonBallImage,activeSprites,cannonBalls,fireSound)
     activeSprites.add(cannon)
     
     for b in range(maxBlob):
-        blob = Blob(blobsType,activeSprites,blobs)
+        blob = Blob(blobsType,hitSound,activeSprites,blobs)
         activeSprites.add(blob)
         blobs.add(blob)
 
