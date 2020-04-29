@@ -4,7 +4,9 @@ from pygame.math import Vector2
 import sys
 import math
 import random
+import pickle
 
+pygame.mixer.pre_init(44100, -16, 1, 512) #frequency, size, channels, buffer (for fixing sound delays)
 pygame.init()
 
 WIN_WIDTH = 400
@@ -15,42 +17,38 @@ FPS = 60
 
 SCREEN = pygame.display.set_mode((WIN_WIDTH,WIN_HEIGHT))
 pygame.display.set_caption('Blob Shooter!')
+
 EYECON = pygame.image.load('eyecon.png')
 pygame.display.set_icon(EYECON)
+pygame.mouse.set_visible(True)
+MOUSE = pygame.image.load('cursor.png').convert_alpha()
+MOUSE_rect = MOUSE.get_rect()
 
-SCORE = 0
-COINS = 999
-LIFE = 100
+bestScore = 0
+        
 #colors
 WHITE = (255,255,255)
 GRAY = (150,150,150)
 TURQUOISE = (0,168,243)
 INDIGO = (63,72,204)
 CYAN = (0,255,255)
-
-class Base(pygame.sprite.Sprite):
-    def __init__(self,base_image,pos):
-        super().__init__()
-        self.original_image = base_image
-        self.image = self.original_image
-        self.rect = self.image.get_rect()
-        self.rect.center = (pos)
-        
-    def rotate(self,angle):
-        self.image = pygame.transform.rotate(self.original_image,angle)
-        x,y = self.rect.center
-        self.rect = self.image.get_rect()
-        self.rect.center = (x,y)
+AQUA = (140,255,251)
+BLACK = (0,0,0)
+RED = (200,0,40)
+YELLOW = (255,242,0)
 
 class Cannon(pygame.sprite.Sprite):
-    def __init__(self, cannon_image, base_image, cannonBall_image,all_sprites, cannonBall_sprites,fire_sound):
+    def __init__(self, cannon_image, cannonBall_image,all_sprites, cannonBall_sprites,fire_sound):
         super().__init__()
         self.status_images = cannon_image
         self.original_image = self.status_images[0]
         self.image = self.original_image
-        self.rect = self.image.get_rect()
-        self.rect.center = (200,631)
+        self.centerPos = (200,631)
+        self.rect = self.image.get_rect(center = self.centerPos)
+        self.pos = Vector2(self.centerPos)
 
+        self.hitPoints = 100
+        self.coins = 0
         self.angle = 0
         self.fireAngle = 90
         self.rotSpeed = 0
@@ -63,10 +61,7 @@ class Cannon(pygame.sprite.Sprite):
         self.all_sprites = all_sprites
         self.cannonBall_sprites = cannonBall_sprites
         self.cannonBall_image = cannonBall_image
-        self.fire_sound = fire_sound
-
-        self.base = Base(base_image,(200,631))
-        self.all_sprites.add(self.base)
+        self.fire_sound = fire_sound 
         
     def update(self):
         self.rotSpeed = 0
@@ -98,29 +93,27 @@ class Cannon(pygame.sprite.Sprite):
     def rotate(self):
         self.angle += self.rotSpeed % 360
         self.fireAngle += self.rotSpeed
-        if self.angle % 360 == 62:
-            self.angle = 60
-            self.fireAngle = 150
-        elif self.angle % 360 == 298:
-            self.angle = 300
-            self.fireAngle = 30
-        self.base.rotate(self.angle)
+        if self.angle % 360 == 82:
+            self.angle = 80
+            self.fireAngle = 170
+        elif self.angle % 360 == 278:
+            self.angle = 280
+            self.fireAngle = 10
+            
         self.image = pygame.transform.rotate(self.original_image,self.angle)
         x,y = self.rect.center
+        self.pos = ((x,y))
         self.rect = self.image.get_rect()
-        self.rect.center = (x,y)
+        self.rect.center = (self.pos)
 
     def fire(self):
-        #self.fire_sound.play()
         current_time = pygame.time.get_ticks()
         if current_time - self.lastFire > self.fireCooldown:
+            self.fire_sound.play()
             self.lastFire = current_time
             cannonBall = CannonBall(self.cannonBall_image,self.angle,-self.fireAngle)
             self.all_sprites.add(cannonBall)
             self.cannonBall_sprites.add(cannonBall)
-
-    def knockback(self):
-        pass #cause of the physics involved and why the base of the cannon is on a separate image
 
 class Blob(pygame.sprite.Sprite):
     def __init__(self,blob_types,hit_sound,all_sprites,blob_sprites):
@@ -132,50 +125,48 @@ class Blob(pygame.sprite.Sprite):
         self.startingY = -750
         self.posX = random.randint(10,WIN_WIDTH)
         self.posY = random.randint(self.startingY, -100)
-        self.posXY = (self.posX,self.posY)
         self.rect = self.image.get_rect(center = (self.posX,self.posY))
-        self.pos = Vector2(self.posXY)
+        self.pos = Vector2((self.posX, self.posY))
 
         self.popAnimation = blob_types[self.key][1]
-        self.popSound = blob_types[self.key][2]
-        self.hitPoints = blob_types[self.key][3]
-        self.scoreValue = blob_types[self.key][4]
-        self.speed = blob_types[self.key][5]
-        self.is_hit = False   
+        self.hitImg = blob_types[self.key][2]
+        self.popSound = blob_types[self.key][3]
+        self.popSound.set_volume(0.3)
+        self.hitPoints = blob_types[self.key][4]
+        self.scoreValue = blob_types[self.key][5]
+        self.speed = blob_types[self.key][6]
+        self.is_hit = False
+        self.hitDuration = 5
 
         self.hit_sound = hit_sound
+        self.hit_sound.set_volume(0.1)
         self.blob_types = blob_types
         self.all_sprites = all_sprites
         self.blob_sprites = blob_sprites
 
     def update(self):
         if self.is_hit:
-            self.hit_sound.play()
-            self.is_hit = False
+            self.flash()
             
         self.pos += Vector2(0,self.speed)
         self.rect.center = self.pos
 
-        if self.hitPoints == 0:
+        if self.hitPoints <= 0:
             self.kill()
-            self.explode_and_spawn()
+            self.popSound.play()
 
-        if self.rect.bottom >= WIN_HEIGHT - 55:
-            global LIFE
-            LIFE -= self.hitPoints * 6
-            self.scoreValue = 0
-            self.kill()
-            self.explode_and_spawn()
+    def flash(self):
+        self.image = self.hitImg
+        self.hitDuration -= 1
+        if self.hitDuration <= 0:
+            self.hit_sound.play()
+            self.image = self.original_image
+            self.is_hit = False
+            self.hitDuration = 5
 
-    def explode_and_spawn(self):
-        global SCORE
-        self.popSound.play()
-        SCORE += self.scoreValue
-        pop = Explode(self.rect.center,self.popAnimation)
-        self.all_sprites.add(pop)
-        new_blob = Blob(self.blob_types,self.hit_sound,self.all_sprites,self.blob_sprites)
-        self.all_sprites.add(new_blob)
-        self.blob_sprites.add(new_blob)
+class Boss(pygame.sprite.Sprite):
+    def __init__(self,image,all_sprites,blob_sprites):
+        super().__init__()
 
 class CannonBall(pygame.sprite.Sprite):
     def __init__(self,cannonBall_image,rot_angle,fire_angle):
@@ -207,6 +198,38 @@ class CannonBall(pygame.sprite.Sprite):
         self.rect.center = self.pos
         if self.rect.bottom <= 0 or self.rect.right <= 0 or self.rect.left >= WIN_WIDTH:
             self.kill()
+
+class BlobCloud(pygame.sprite.Sprite):
+    def __init__(self, image, cloud_sprites):
+        super().__init__()
+        self.cloud_images = image
+        self.original_image = random.choice(self.cloud_images)
+        self.image = self.original_image
+        self.startingX = 500
+        self.posX = random.randint(self.startingX,600)
+        self.posY = random.randint(10,300)
+        self.rect = self.image.get_rect(center = (self.posX,self.posY))
+        self.rotPos = Vector2((self.posX,self.posY))
+        self.pos = Vector2((self.posX,self.posY))
+        self.angle = random.randint(0,360)
+
+        self.speed = random.uniform(-2,-0.6)
+        self.cloud_sprites = cloud_sprites
+
+    def update(self):
+        self.angle += 1 % 360
+        self.image = pygame.transform.rotate(self.original_image,self.angle)
+        x,y = self.rect.center
+        self.rect = self.image.get_rect()
+        self.rotPos = Vector2(x,y)
+        self.rect.center = self.rotPos
+        self.pos += Vector2(self.speed,0)
+        self.rect.center = self.pos
+
+        if self.rect.right <= 0:
+            self.kill()
+            cloud = BlobCloud(self.cloud_images, self.cloud_sprites)
+            self.cloud_sprites.add(cloud)
 
 class Explode(pygame.sprite.Sprite):
     def __init__(self,center, pop_animation):
@@ -266,10 +289,41 @@ class Hit(pygame.sprite.Sprite):
                 self.rect.center = center
                 self.rotate()
 
-def Button():
-    pass
+class Base(pygame.sprite.Sprite):
+    def __init__(self,image,pos):
+        super().__init__()
+        self.image = image
+        self.rect = self.image.get_rect()
+        self.rect.center = pos
+        self.pos = pos
 
-def Text(screen, text, size, pos, font,color, align):
+    def update(self):
+        self.rect.center = self.pos
+        
+class Button:
+    def __init__(self, image,higlight, pos):
+        self.image = image
+        self.highlight_image = higlight
+        self.original_image = image
+        self.rect = self.image.get_rect()
+        self.rect.center = pos
+        self.bloopSound = pygame.mixer.Sound('musicSFX/bloop0.wav')
+
+    def draw_and_check(self,screen):
+        if self.rect.collidepoint(pygame.mouse.get_pos()):
+            self.image = self.highlight_image
+        else:
+            self.image = self.original_image
+        screen.blit(self.image,self.rect)
+
+    def is_clicked(self,event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:
+                if self.rect.collidepoint(event.pos):
+                    self.bloopSound.play()
+                    return True
+
+def draw_text(screen, text, size, pos, font,color, align):
     font = pygame.font.Font(pygame.font.match_font(font),size)
     text_surf = font.render(text,True,color)
     text_rect = text_surf.get_rect()
@@ -283,73 +337,256 @@ def Text(screen, text, size, pos, font,color, align):
         text_rect = pos
     screen.blit(text_surf, text_rect)
 
-def Menu():
+def yes_or_no(text):
     pass
-                               
-def main():
-    global LIFE, COINS
+
+def pause_menu():
+    transparentBG = pygame.Surface((400,688))
+    transparentBG.set_alpha(25)
+    transparentBG.fill(INDIGO)
+
+    resumeImage = pygame.image.load('Button/Resume.png').convert_alpha()
+    resumeHLimage = pygame.image.load('Button/ResumeHL.png').convert_alpha()
+    menuImage = pygame.image.load('Button/Menu.png').convert_alpha()
+    menuHLimage = pygame.image.load('Button/MenuHL.png').convert_alpha()
+
+    SCREEN.blit(transparentBG,(0,0))
+
+    draw_text(SCREEN,"Pause", 60,(200,240),'bevan',WHITE,'midtop')
+
+    resumeButton = Button(resumeImage,resumeHLimage,(140,365))
+    menuButton = Button(menuImage,menuHLimage,(260,365))
+
+    paused = True
+    while paused:
+        event = pygame.event.poll() #single events only
+        if event.type == QUIT:
+            pygame.quit()
+            sys.exit()
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                return False
+
+        if resumeButton.is_clicked(event):
+            return False
+
+        if menuButton.is_clicked(event):
+            return True
+
+        #SCREEN.fill(CYAN)
+        
+        resumeButton.draw_and_check(SCREEN)
+        menuButton.draw_and_check(SCREEN)
+
+        #MOUSE_rect = pygame.mouse.get_pos()
+        #SCREEN.blit(MOUSE,MOUSE_rect)
+
+        CLOCK.tick(FPS)
+        pygame.display.flip()
+
+def game_over(score_after, coins_left):
+    global bestScore
+    restartImg = pygame.image.load('Button/Restart.png').convert_alpha()
+    restartImgHL = pygame.image.load('Button/RestartHL.png').convert_alpha()
+    menu2Img = pygame.image.load('Button/Menu2.png').convert_alpha()
+    menu2ImgHL = pygame.image.load('Button/Menu2HL.png').convert_alpha()
+    gameOverBG = pygame.image.load('Background/GameOverBG.png').convert_alpha()
+    transparentBG = pygame.Surface((400,688))
+    transparentBG.set_alpha(25)
+    transparentBG.fill(RED)
+    scoreColor = WHITE
+
+    pygame.mixer.music.load('musicSFX/over_music.mp3')
+    pygame.mixer.music.play(-1)
+    pygame.mixer.music.set_volume(0.2)
+
+    restartButton = Button(restartImg,restartImgHL,(140,435))
+    menu2Button = Button(menu2Img, menu2ImgHL, (260,435))
+
+    SCREEN.blit(transparentBG,(0,0))
+    SCREEN.blit(gameOverBG,(15,145))
+
+    if score_after + coins_left > bestScore:
+        bestScore = score_after + coins_left
+        scoreColor = YELLOW
+        with open('bestScore.dat','wb') as file:
+            pickle.dump(bestScore,file)
+
+    draw_text(SCREEN,'{:09}'.format(score_after + coins_left),40,(200,270),'bevan',scoreColor,'midtop')
+    draw_text(SCREEN,'+{0}'.format(coins_left), 35, (200, 330), 'bevan', WHITE, 'midtop')
+            
+    over = True
+    while over:
+        event = pygame.event.poll()
+        if event.type == QUIT:
+            over = False
+            pygame.quit()
+            sys.exit()
+
+        if restartButton.is_clicked(event):
+            pygame.mixer.music.stop()
+            over = False
+            main_game()
+
+        if menu2Button.is_clicked(event):
+            pygame.mixer.music.stop()
+            over = False
+            main_menu()
+
+        restartButton.draw_and_check(SCREEN)
+        menu2Button.draw_and_check(SCREEN)
+
+        CLOCK.tick(FPS)
+        pygame.display.flip()
+    
+def main_menu():
+    global bestScore
+    cloudSprites = pygame.sprite.Group()
+    blobClouds = list()
+    
+    try:
+        with open("bestScore.dat", 'rb') as scoreFile:
+            bestScore = pickle.load(scoreFile)
+    except:
+        pass
+    
+    pygame.mixer.music.load('musicSFX/menu_music.mp3')
+    pygame.mixer.music.play(-1)
+    pygame.mixer.music.set_volume(0.3)
+    menuBG = pygame.image.load('Background/MenuBG.png').convert_alpha()
+    titleImg = pygame.image.load('Background/Title.png').convert_alpha()
+    playImg = pygame.image.load('Button/Play.png').convert_alpha()
+    playImgHL = pygame.image.load('Button/PlayHL.png').convert_alpha()
+    quitImg = pygame.image.load('Button/Quit.png').convert_alpha()
+    quitImgHL = pygame.image.load('Button/QuitHL.png').convert_alpha()
+    
+    playButton = Button(playImg,playImgHL,(200,480))
+    quitButton = Button(quitImg,quitImgHL,(40,640))
+
+    for i in range(3):
+        cloudPthImg = 'Enemy/blob{0}.png'.format(i)
+        cloudImg = pygame.image.load(cloudPthImg)
+        blobClouds.append(cloudImg)
+
+    for i in range(3):
+        blobCloud = BlobCloud(blobClouds,cloudSprites)
+        cloudSprites.add(blobCloud)
+
+    in_menu = True
+    while in_menu:
+        event = pygame.event.poll()
+        if event.type == pygame.QUIT:
+            in_menu = False
+            pygame.quit()
+            sys.exit()
+            
+        if quitButton.is_clicked(event):
+            in_menu = False
+            pygame.quit()
+            sys.exit()
+
+        if playButton.is_clicked(event):
+            pygame.mixer.music.fadeout(1500)
+            pygame.time.delay(1500)            
+            pygame.mixer.music.stop()
+            in_menu = False
+            main_game()
+
+        cloudSprites.update()    
+
+        SCREEN.fill(AQUA)
+
+        cloudSprites.draw(SCREEN)
+        
+        SCREEN.blit(menuBG,(0,0))
+        SCREEN.blit(titleImg,(35,30))
+
+        playButton.draw_and_check(SCREEN)
+        quitButton.draw_and_check(SCREEN)
+
+        draw_text(SCREEN,"Current Best:", 20, (200,570), 'bevan', WHITE,'midtop')
+        draw_text(SCREEN,'{:09}'.format(bestScore), 25, (200,595), 'bevan', WHITE,'midtop')
+        #MOUSE_rect = pygame.mouse.get_pos()
+        #SCREEN.blit(MOUSE,MOUSE_rect)
+        
+        CLOCK.tick(FPS)
+        pygame.display.flip()
+
+def main_game():
     #Sprite groups
     activeSprites = pygame.sprite.Group()
-    playerCannon = pygame.sprite.Group()
     blobs = pygame.sprite.Group()
     cannonBalls = pygame.sprite.Group()
-    maxBlob = 10
-    Pause = False
-    gameOver = False
     
-    #Play music on loop and load sounds
-    pygame.mixer.music.load('musicSFX/bg_music.mp3')
+    #necessary vars
+    maxBlob = 10
+    score = 0
+    killCount = 0
+    
+    #Play music on loop
+    pygame.mixer.music.load('musicSFX/game_music.mp3')
     pygame.mixer.music.play(-1)
-    fireSound = None #pygame.mixer.Sound('musicSFX/fire.wav')
+    pygame.mixer.music.set_volume(0.3)
+
+    #button images
+    pauseImage = pygame.image.load('Button/Pause0.png').convert_alpha()
+    pauseHLimage = pygame.image.load('Button/PauseHL0.png').convert_alpha()
+    shopImage = pygame.image.load('Button/Shop2.png').convert_alpha()
+    shopHLimage = pygame.image.load('Button/ShopHL2.png').convert_alpha()
 
     #Load/create images & sounds
     blobImages = list()
+    blobHitImages = list()
     cannonStatusImages = list()
     hitAnimation = list()
     popSounds = list()
-    hitSound = pygame.mixer.Sound('musicSFX/hit0.wav')
     popAnimations = {'smallPop':list(),'mediumPop':list(),'largePop':list()}
-    bgImage = pygame.image.load('Background/Background.png')
-    pauseBG = pygame.image.load('Background/pauseBG.png')
-    textBG = pygame.image.load('Background/TextBG0.png')
-    turquoiseBG = pygame.Surface((400,650))
-    turquoiseBG.set_alpha(128)
-    turquoiseBG.fill(TURQUOISE)
-    cannonLifeImage = pygame.image.load('Cannon/Life0.png')
-    coinImage = pygame.image.load('Cannon/Coin.png')
-    pauseImage = pygame.image.load('Button/Pause.png')
-    cannonBaseImage = pygame.image.load("Cannon/Base.png")
-    cannonBallImage = pygame.image.load("Cannon/cannonBall0.png")
+    bgImage = pygame.image.load('Background/Background.png').convert_alpha()
+    textBG = pygame.image.load('Background/TextBG0.png').convert_alpha()
+    cannonLifeImage = pygame.image.load('Cannon/Life0.png').convert_alpha()
+    coinImage = pygame.image.load('Cannon/Coin.png').convert_alpha()
+    cannonBallImage = pygame.image.load("Cannon/cannonBall0.png").convert_alpha()
 
+    transparentBase = pygame.Surface((400,62))
+    transparentBase.set_alpha(0)
+    transparentBase.fill(WHITE)
+
+    hitSound = pygame.mixer.Sound('musicSFX/hit0.wav')
+    fireSound = pygame.mixer.Sound('musicSFX/fire0.wav')
+
+    #append images to their list
     for i in range(3):
         cannonPthImg = 'Cannon/cannon ({0}).png'.format(i)
-        cannonStatusImages.append(pygame.image.load(cannonPthImg))      
+        cannonStatusImages.append(pygame.image.load(cannonPthImg).convert_alpha())     
     for i in range(3):
         blobPthImg = 'Enemy/blob{0}.png'.format(i)
+        blobHitPthImg = 'Enemy/blob{0}hit.png'.format(i)
         popPthSound = 'musicSFX/pop{0}.wav'.format(i)
-        blobImages.append(pygame.image.load(blobPthImg))
+        blobImages.append(pygame.image.load(blobPthImg).convert_alpha())
         popSounds.append(pygame.mixer.Sound(popPthSound))
-        
+        blobHitImages.append(pygame.image.load(blobHitPthImg).convert_alpha())
+
+    #animations
     for i in range(6):
         smallpopPthImg = 'Enemy/Blob1Pop/smallPop{0}.png'.format(i)
         mediumpopPthImg = 'Enemy/Blob2Pop/mediumPop{0}.png'.format(i)
         largepopPthImg = 'Enemy/Blob3Pop/largePop{0}.png'.format(i)
-        ballHitPthImg = 'Cannon/cannonball hit/ballHit{0}.png'.format(i)
-        smallPopImg = pygame.image.load(smallpopPthImg)
-        mediumPopImg = pygame.image.load(mediumpopPthImg)
-        largePopImg = pygame.image.load(largepopPthImg)
-        ballHitImg = pygame.image.load(ballHitPthImg)
+        ballHitPthImg = 'Cannon/cannonBallHit/ballHit{0}.png'.format(i)
+        smallPopImg = pygame.image.load(smallpopPthImg).convert_alpha()
+        mediumPopImg = pygame.image.load(mediumpopPthImg).convert_alpha()
+        largePopImg = pygame.image.load(largepopPthImg).convert_alpha()
+        ballHitImg = pygame.image.load(ballHitPthImg).convert_alpha()
         popAnimations['smallPop'].append(smallPopImg)
         popAnimations['mediumPop'].append(mediumPopImg)
         popAnimations['largePop'].append(largePopImg)
         hitAnimation.append(ballHitImg)
 
-    #blobs >> type: [image, popAnimation, popSound,hp, scoreValue, speed] 
-    blobsType = {'smallBlob' :[blobImages[0], popAnimations['smallPop'], popSounds[0], 1, 3, 1.2],
-                 'mediumBlob':[blobImages[1], popAnimations['mediumPop'],popSounds[1], 2, 6, 0.9],
-                 'largeBlob' :[blobImages[2], popAnimations['largePop'], popSounds[2], 3, 9, 0.6]}
+    #blob's Type: [image, popAnimation, popSound,hp, scoreValue, speed] 
+    blobsType = {'smallBlob' :[blobImages[0], popAnimations['smallPop'], blobHitImages[0],popSounds[0], 1, 3, 1.2],
+                 'mediumBlob':[blobImages[1], popAnimations['mediumPop'],blobHitImages[1],popSounds[1], 2, 6, 0.9],
+                 'largeBlob' :[blobImages[2], popAnimations['largePop'], blobHitImages[2],popSounds[2], 3, 9, 0.6]}
 
-    cannon = Cannon(cannonStatusImages,cannonBaseImage,cannonBallImage,activeSprites,cannonBalls,fireSound)
+    cannon = Cannon(cannonStatusImages,cannonBallImage,activeSprites,cannonBalls,fireSound)
     activeSprites.add(cannon)
     
     for b in range(maxBlob):
@@ -357,7 +594,16 @@ def main():
         activeSprites.add(blob)
         blobs.add(blob)
 
-    #mainloop
+    base = Base(transparentBase,(200,658))
+    activeSprites.add(base)
+
+    pauseButton = Button(pauseImage,pauseHLimage,(360,15))
+    shopButton = Button(shopImage,shopHLimage,(335,658))
+
+    pause = False
+    gameOver = False
+    to_menu = False
+
     running = True
     while running:
         for event in pygame.event.get():
@@ -365,23 +611,23 @@ def main():
                 running = False
                 pygame.quit()
                 sys.exit()
+                
             if event.type == pygame.KEYDOWN:
                 if not gameOver:
                     if event.key == pygame.K_p:
-                        if not Pause:
-                            Pause = True
-                            pygame.mixer.music.pause()
-                        else:
-                            Pause = False
-                            pygame.mixer.music.unpause()
+                        pause = True
+                        
             if event.type == pygame.KEYUP:
                 if event.key == pygame.K_SPACE:
                     cannon.is_firing = False
                 if event.key == pygame.K_LEFT or event.key == pygame.K_RIGHT:
                     cannon.is_aiming = False
 
-        if not Pause and not gameOver:
+            if pauseButton.is_clicked(event):
+                if not gameOver:
+                    pause = True
 
+        if not pause and not gameOver:
             SCREEN.blit(bgImage,(0,0))
             activeSprites.update()
 
@@ -391,32 +637,61 @@ def main():
                 activeSprites.add(hit)
                 collide.is_hit = True
                 collide.hitPoints -= 1
+                if collide.hitPoints <= 0:
+                    score += collide.scoreValue
+                    pop = Explode(collide.rect.center,collide.popAnimation)
+                    activeSprites.add(pop)
+                    new_blob = Blob(blobsType,hitSound,activeSprites,blobs)
+                    activeSprites.add(new_blob)
+                    blobs.add(new_blob)
+
+            baseCollide = pygame.sprite.spritecollide(base,blobs,True)
+            for collide in baseCollide:
+                cannon.hitPoints -= collide.hitPoints * 6
+                collide.popSound.play()
+                pop = Explode(collide.rect.center,collide.popAnimation)
+                activeSprites.add(pop)
+                new_blob = Blob(blobsType,hitSound,activeSprites,blobs)
+                activeSprites.add(new_blob)
+                blobs.add(new_blob)
 
             activeSprites.draw(SCREEN)
 
-            if LIFE <= 0:
-                LIFE = 0
-                gameOver = True
+            if cannon.hitPoints <= 0:
+                cannon.hitPoints = 0
+                if cannon.hitPoints == 0 and not pop.alive():
+                    pygame.mixer.music.stop()
+                    gameOver = True
 
             SCREEN.blit(textBG,(0,0))
-            SCREEN.blit(pauseImage,(345,3))
+            pauseButton.draw_and_check(SCREEN)
+            shopButton.draw_and_check(SCREEN)
             
-            Text(SCREEN,'{:09}'.format(SCORE), 20, (25,-2),'bevan',CYAN,'topleft')
-            SCREEN.blit(coinImage,(165,3))
-            Text(SCREEN,str(COINS), 20, (195,-2),'bevan',WHITE,'topleft')
-            SCREEN.blit(cannonLifeImage,(255,3))
-            Text(SCREEN,str(LIFE), 20,(285,-2),'bevan',WHITE,'topleft')         
+            draw_text(SCREEN,'{:09}'.format(score), 20, (25,-2),'bevan',CYAN,'topleft')
+            SCREEN.blit(cannonLifeImage,(165,3))
+            draw_text(SCREEN,str(cannon.hitPoints), 20, (195,-2),'bevan',WHITE,'topleft')
+            SCREEN.blit(coinImage,(255,3))
+            draw_text(SCREEN,str(cannon.coins), 20,(285,-2),'bevan',WHITE,'topleft')         
 
-        if Pause:
-            SCREEN.blit(pauseBG,(0,270))
-            Text(SCREEN,"Paused!", 50,(200,270),'bevan',WHITE,'midtop')
-            Text(SCREEN,"Press 'p' to continue", 15, (200,340),'bevan',WHITE,'midtop')
+        if pause:
+            pygame.mixer.music.pause()
+            to_menu = pause_menu()
+            if to_menu:
+                running = False
+                pygame.mixer.music.stop()
+                main_menu()
+            if not to_menu:
+                pause = False
+                pygame.mixer.music.unpause()
 
         if gameOver:
-            Text(SCREEN,"Game Over!", 25, (200,250), 'bevan', WHITE,'midtop')          
+            game_over(score,cannon.coins)
+
+        #MOUSE_rect = pygame.mouse.get_pos()
+        #SCREEN.blit(MOUSE,MOUSE_rect)
 
         CLOCK.tick(FPS)
         pygame.display.flip()
 
 if __name__ == "__main__":
-    main()
+    main_menu()
