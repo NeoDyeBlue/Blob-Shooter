@@ -1,2 +1,3 @@
 # Blob Shooter
-first pygame project
+- first pygame project
+- musics from Heatley Bros Music
