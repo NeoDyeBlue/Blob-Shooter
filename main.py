@@ -88,7 +88,10 @@ class Cannon(pygame.sprite.Sprite):
         self.rotate() #also aim
 
         if not self.is_aiming and not self.is_firing:
-            self.original_image = self.status_images[0]
+            if self.hitPoints <= 20:
+                self.original_image = self.status_images[3]
+            else:
+                self.original_image = self.status_images[0]
            
     def rotate(self):
         self.angle += self.rotSpeed % 360
@@ -408,12 +411,13 @@ def game_over(score_after, coins_left):
 
     if score_after + coins_left > bestScore:
         bestScore = score_after + coins_left
-        scoreColor = YELLOW
+        draw_text(SCREEN,'New!'.format(coins_left), 20, (100, 280), 'bevan', YELLOW, 'midtop')
+        
         with open('bestScore.dat','wb') as file:
             pickle.dump(bestScore,file)
 
-    draw_text(SCREEN,'{:09}'.format(score_after + coins_left),40,(200,270),'bevan',scoreColor,'midtop')
-    draw_text(SCREEN,'+{0}'.format(coins_left), 35, (200, 330), 'bevan', WHITE, 'midtop')
+    draw_text(SCREEN,'{:09}'.format(score_after + coins_left),40,(200,290),'bevan',WHITE,'midtop')
+    draw_text(SCREEN,'+{0}'.format(coins_left), 35, (200, 340), 'bevan', WHITE, 'midtop')
             
     over = True
     while over:
@@ -512,6 +516,27 @@ def main_menu():
         CLOCK.tick(FPS)
         pygame.display.flip()
 
+def shop_menu(player):
+    shopBG = pygame.image.load('Background/ShopBG.png').convert()
+
+    in_shop = True
+    while in_shop:
+        event = pygame.event.poll()
+        if event.type == pygame.QUIT:
+            in_shop = False
+            pygame.quit()
+            sys.exit()
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                in_shop = False
+                return
+
+        SCREEN.blit(shopBG,(0,0))
+
+        CLOCK.tick(FPS)
+        pygame.display.flip()
+
 def main_game():
     #Sprite groups
     activeSprites = pygame.sprite.Group()
@@ -555,7 +580,7 @@ def main_game():
     fireSound = pygame.mixer.Sound('musicSFX/fire0.wav')
 
     #append images to their list
-    for i in range(3):
+    for i in range(4):
         cannonPthImg = 'Cannon/cannon ({0}).png'.format(i)
         cannonStatusImages.append(pygame.image.load(cannonPthImg).convert_alpha())     
     for i in range(3):
@@ -603,6 +628,7 @@ def main_game():
     pause = False
     gameOver = False
     to_menu = False
+    to_shop = False
 
     running = True
     while running:
@@ -626,6 +652,10 @@ def main_game():
             if pauseButton.is_clicked(event):
                 if not gameOver:
                     pause = True
+
+            if shopButton.is_clicked(event):
+                to_shop = True
+                
 
         if not pause and not gameOver:
             SCREEN.blit(bgImage,(0,0))
@@ -674,18 +704,28 @@ def main_game():
             draw_text(SCREEN,str(cannon.coins), 20,(285,-2),'bevan',WHITE,'topleft')         
 
         if pause:
+            running = False
             pygame.mixer.music.pause()
             to_menu = pause_menu()
             if to_menu:
-                running = False
                 pygame.mixer.music.stop()
                 main_menu()
             if not to_menu:
                 pause = False
+                running = True
                 pygame.mixer.music.unpause()
 
         if gameOver:
+            running = False
             game_over(score,cannon.coins)
+
+        if to_shop:
+            running = False
+            pygame.mixer.music.pause()
+            shop_menu(cannon)
+            to_shop = False
+            running = True
+            pygame.mixer.music.unpause()
 
         #MOUSE_rect = pygame.mouse.get_pos()
         #SCREEN.blit(MOUSE,MOUSE_rect)
